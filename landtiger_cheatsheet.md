@@ -10,6 +10,7 @@
   - [Timer header](#timer-header-file)
   - [Timer initialization](#timers-initialization-enable-disable-reset)
   - [Timer IRQHandler](#timer-irqhandler)
+  - [Retrieve Counter Value](#retrieve-timer-counter-value)
 
 - 🕒 [RIT Timer](#rit-timer)
   - [RIT header](#rit-header-file)
