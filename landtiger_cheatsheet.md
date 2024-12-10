@@ -1,6 +1,39 @@
 # Landtiger LPC1768 ARM Cortex M3 - CheatSheet
 **Revalor Riccardo - [Github Repo for this CheatSheet](https://github.com/RiccardoRevalor/LandTiger1768_CheatSheet)**
 
+## Summary
+
+- 🔋 [Power Down Mode](#power-down-mode)
+
+- ⏱️ [Generic Timers](#generic-timers)
+  - [Calculating Timer Counter](#calculating-the-timer-counter)
+  - [Timer header](#timer-header-file)
+  - [Timer initialization](#timers-initialization-enable-disable-reset)
+  - [Timer IRQHandler](#timer-irqhandler)
+
+- 🕒 [RIT Timer](#rit-timer)
+  - [RIT header](#rit-header-file)
+  - [RIT initialization](#rit-initialization-enable-disable-reset)
+  - [RIT IRQHandler](#rit_irqhandler)
+
+- 🎮 [Joystick](#joystick)
+  - [Initialization](#joystick-initialization---joystick_init)
+  - [Polling with RIT](#joystick-rit-polling---rit_irqhandler)
+
+- 🎚️ [ADC with Potentiometer](#adc-to-be-used-with-potentiometer)
+  - [ADC Header](#adc-header-file)
+  - [ADC Initialization/Start conversion](#adc-initialization-and-start_conversion---adc_init-adc_start_conversion)
+  - [ADC IRQHandler](#adc-handler---adc_irqhandler)
+  - [Multiple conversions with RIT](#use-of-rit-for-multiple-conversions-at-a-certain-rate)
+
+- 🔊 [DAC Connected to the Speaker](#dac-connected-to-the-speaker)
+  - [DAC Value Conversion](#convert-a-value)
+
+- [Resources](#resources)  
+
+
+
+
 ## Power Down Mode
 Put at the end of `sample.c`:
 ```c
@@ -10,6 +43,143 @@ LPC_SC->PCON &= ~(0x2);
 while (1) { /* Loop forever */	
 	__ASM("wfi");
 }
+```
+
+## Generic Timers
+
+### Calculating the timer counter 
+In `sample.c` you have to call the function to set the timer:
+```c
+init_timer(timerNumber, K);	
+enable_timer(timerNumber);	
+```
+The timer numer is used to select the timer and goes from 0 to 4. <br>
+The general rule for assigning the counter starting value is this: <space>
+$K = T * Freq$ <space> (K converted to hex)<br>
+$Freq$ is usually 25 Mhz (CCLK / 4) <br>
+$T$ is related to what you want to have as the timer interval. <br> 
+
+### Timer header file
+
+#### File: `timer.h`
+```c
+#ifndef __TIMER_H
+#define __TIMER_H
+
+/* init_timer.c */
+extern uint32_t init_timer( uint8_t timer_num, uint32_t timerInterval );
+extern void enable_timer( uint8_t timer_num );
+extern void disable_timer( uint8_t timer_num );
+extern void reset_timer( uint8_t timer_num );
+/* IRQ_timer.c */
+extern void TIMER0_IRQHandler (void);
+extern void TIMER1_IRQHandler (void);
+
+#endif /* end __TIMER_H */
+```
+
+### Timers Initialization, enable, disable, reset
+Given a specific timer, you can assign different values to its Match Registers.
+The Match Control Register is used to set the behavior of te timer once a match has occurred. <br>
+For example, regarding MR0 we can set:
+| BIT Number| If set to 1         | If set to 0  |
+|-----------|---------------------|--------------|
+|    0      | interrupt generated  | no interrupt|
+|    1      | reset TC after match       | no reset      |
+|    2      | stop the timer after match       | no stop       |
+And so on for the other MR, by using higher bits (bit 3,4,5 for MR1 etc)
+
+#### File: `lib_timer.c`
+
+```c 
+#include "LPC17xx.h"
+#include "timer.h"
+
+uint32_t init_timer ( uint8_t timer_num, uint32_t TimerInterval )
+{
+  if ( timer_num == 0 ) {
+	LPC_TIM0->MR0 = TimerInterval;
+	//LPC_TIM0->MR1 = OtherValue if needed
+	LPC_TIM0->MCR = 3; 
+	//3 -> 011 -> yes interrupt, yes reset, no stop
+	//7 -> 111 -> yes interrupt, yes reset, yes stop
+	NVIC_EnableIRQ(TIMER0_IRQn);
+	NVIC_SetPriority(TIMER0_IRQn, 0);	
+	return (1);
+  } else {
+	//other timers...
+  }
+
+  return (0);
+}
+
+void enable_timer( uint8_t timer_num ) {
+  if ( timer_num == 0 )
+  {
+	LPC_TIM0->TCR = 1;
+  }
+  else
+  {
+	//other timers...
+  }
+  return; //NOW TCR IS 1 SO NOW TIMER0 COUNTER STARTS COUNTING
+}
+
+void disable_timer( uint8_t timer_num )
+{
+  if ( timer_num == 0 )
+  {
+	LPC_TIM0->TCR = 0;
+  }
+  else
+  {
+	//other timers...
+  }
+  return;
+}
+
+void reset_timer( uint8_t timer_num )
+{
+  uint32_t regVal;
+
+  if ( timer_num == 0 )
+  {
+	regVal = LPC_TIM0->TCR;
+	regVal |= 0x02;
+	LPC_TIM0->TCR = regVal;
+  }
+  else
+  {
+	//other timers
+  }
+  return;
+}
+
+
+```
+### TIMER IRQHandler
+Handler for TIMER0 as example:
+
+#### File: `IRQ_timer.c`
+```c 
+#include "LPC17xx.h"
+#include "timer.h"
+#include "../led/led.h"
+void TIMER0_IRQHandler (void){
+	
+	//your code here
+	
+	LPC_TIM0->IR |= 1;			/* clear interrupt flag */
+	return;
+}
+``` 
+Remember: if you declare a variable as `static` inside the Timer handler (or anywhere in the code) its value is updated every time it's modified by subsequent interrupts and you can keep track of it without its lost!
+
+### Retrieve Timer Counter value
+For example for Timer0:
+```c
+//after having imported: #include "LPC17xx.h" 
+LPC_TIM0->TC; //32 bit
 ```
 
 ## RIT Timer
@@ -180,7 +350,8 @@ void RIT_IRQHandler (void)
 	}
 }
 ```
-## ADC
+## ADC (to be used with Potentiometer)
+8 channel 12-bit ADC <br>
 Using the SIMULATOR, To disable potentiometer *non idealities* you have to go the the emulator Settings (rx click on emulator window)> uncheck *Enable/Disable Potentiometer non ideality* <br>
 In `sample.c` you have to call the function to set the ADC:
 ```c
@@ -249,7 +420,14 @@ void ADC_start_conversion (void) {
 ```
 ### ADC Handler -> `ADC_IRQHandler()`
 #### File:  `IRQ_adc.c` 
-Executed after a signal is received from the ADC itself.
+Executed after a signal is received from the ADC itself. <br>
+The conversion result has to be read from the ADGDR register, containing the ADC’s DONE bit and 
+the result of the most recent A/D conversion, stored at **Bit 15:4**.
+
+```c
+AD_current = ((LPC_ADC->ADGDR>>4) & 0xFFF);
+```
+
 ```c
 #include "LPC17xx.h"
 #include "adc.h"
@@ -291,9 +469,53 @@ void RIT_IRQHandler (void) {
 }
 ```
 
+## DAC (Connected to the speaker)
+
+### Convert a value 
+The *Digital-to-Analog Converter* receives the value to be converted on the DACR Register. This read/write register includes the digital value to be converted to analog, and a bit that 
+trades off performance vs. power. <br>
+**Bits 5:0 are reserved, so you have to shift left the value at the sixth bit.** <br>
+The whole process of conversion is done using a Timer. In the example above Timer0 is used, but it would be better to use RIT. <br>
+After havig set the timer properly, The conversion is handled at the `TIMER0_IRQHandler()`. In this example, *SinTable* contains the values to be converted. <br>
+Note that the DAC peripheral does not have a control bit in PCONP. To enable the DAC, 
+its output must be selected to appear on the related pin, P0.26, by configuring the 
+PINSEL1 register. 
+#### File `IRQ_timer.c`
+```c
+#include "LPC17xx.h"
+#include "timer.h"
+
+uint16_t SinTable[45] =                                       /* ÕýÏÒ±í                       */
+{
+    410, 467, 523, 576, 627, 673, 714, 749, 778,
+    799, 813, 819, 817, 807, 789, 764, 732, 694, 
+    650, 602, 550, 495, 438, 381, 324, 270, 217,
+    169, 125, 87 , 55 , 30 , 12 , 2  , 0  , 6  ,   
+    20 , 41 , 70 , 105, 146, 193, 243, 297, 353
+}; //To be converted by the DAC
+
+void TIMER0_IRQHandler (void)
+{
+	static int ticks=0;
+	/* DAC management */	
+	LPC_DAC->DACR = (SinTable[ticks]<<6); //shift to start at bit 6
+	ticks++;
+	if(ticks==45) ticks=0; //length of the matrix, after that convert again from the first element
+
+	
+  LPC_TIM0->IR = 1;			/* clear interrupt flag */
+  return;
+}
+```
+
+
+
 ### Resources
 #### PINSEL Register associated to each pin:
 ![alt text](image-1.png)
+
+#### Match Control Registers bits, for generic timers:
+![alt text](image-5.png)
 
 #### PCONP Register bits:
 ![alt text](image-2.png)
