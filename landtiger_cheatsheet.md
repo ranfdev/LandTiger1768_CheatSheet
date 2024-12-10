@@ -30,6 +30,10 @@
 - 🔊 [DAC Connected to the Speaker](#dac-connected-to-the-speaker)
   - [DAC Value Conversion](#convert-a-value)
 
+- 💻 [LCD and Touch Screen](#lcd-and-touch-screen)
+  - [LCD Initialization and Configuration](#lcd-initialization-and-configuration)
+  - [LCD Clear](#lcd-clear)
+
 - [Resources](#resources)  
 
 
@@ -471,7 +475,7 @@ void RIT_IRQHandler (void) {
 ```
 
 ## DAC (Connected to the speaker)
-
+10-bit DAC. Precision of 1024 levels from 0V to 3.3 V. Max update rate of 1 Mhz. LSB = 3.3 / 1024
 ### Convert a value 
 The *Digital-to-Analog Converter* receives the value to be converted on the DACR Register. This read/write register includes the digital value to be converted to analog, and a bit that 
 trades off performance vs. power. <br>
@@ -479,8 +483,8 @@ trades off performance vs. power. <br>
 The whole process of conversion is done using a Timer. In the example above Timer0 is used, but it would be better to use RIT. <br>
 After havig set the timer properly, The conversion is handled at the `TIMER0_IRQHandler()`. In this example, *SinTable* contains the values to be converted. <br>
 Note that the DAC peripheral does not have a control bit in PCONP. To enable the DAC, 
-its output must be selected to appear on the related pin, P0.26, by configuring the 
-PINSEL1 register. 
+its output must be selected to appear on the related pin, **P0.26**, by configuring the 
+**PINSEL1** register. 
 #### File `IRQ_timer.c`
 ```c
 #include "LPC17xx.h"
@@ -509,7 +513,189 @@ void TIMER0_IRQHandler (void)
 }
 ```
 
+## LCD and Touch Screen 
+16-bit parallel LCD interface, resolution of 320x240 pixels (vertical_x_horizontal), SPI Touch Screen interface, i80 LCD controller interface.
 
+### LCD Screen
+- It communicates with the board using the **DB Register**, which has 18 bits but we use just 16 of them. Stuff to be shows on the LCD haas to be written inside the DB register first. 
+- Register **IM** (which has 3 bits: IM3 down to IM0) has to have the bits set to **0010** to use the i80 interface. 
+- the **LCD Source Driver** has bytes **720:1** and is used to set the RGB color for the selected column (first 3 bytes: RGB for first column, and so on). The 
+- The **LCD Gate Driver** has bytes **320:1** and is used to select the used row (ex. select row 3: set the third byte)
+- Register **22 h** (0x0022): Write Data to GRAM
+- Registers **20 h, 21 h** (0x0020, 0x0021): Horizontal GRAM (20), Vertical GRAM (21) Address Set
+
+### LCD Initialization and Configuration
+In `sample.c` you have to call:
+```c
+LCD_Initialization();	
+```
+#### File `GCLD.c`
+
+**Notice that LCD uses the same GPIO Pins as LEDs (P2.0 up to 2.7) so when using the LCD some leds will randomly be switched on!**
+```c
+static void LCD_Configuration(void)
+{
+	/* Configure the LCD Control pins */
+	
+	/* EN = P0.19 , LE = P0.20 , DIR = P0.21 , CS = P0.22 , RS = P0.23 , RS = P0.23 */
+	/* RS = P0.23 , WR = P0.24 , RD = P0.25 , DB[0.7] = P2.0...P2.7 , DB[8.15]= P2.0...P2.7 */  
+	LPC_GPIO0->FIODIR   |= 0x03f80000;
+	LPC_GPIO0->FIOSET    = 0x03f80000;
+}
+```
+
+Device code always read at Register 0h (0x0).
+```c
+void LCD_Initialization(void)
+{
+	uint16_t DeviceCode;
+	
+	LCD_Configuration();
+	delay_ms(100);
+	DeviceCode = LCD_ReadReg(0x0000);		/* ¶ÁÈ¡ÆÁID	*/	
+	
+	if( DeviceCode == 0x9325 || DeviceCode == 0x9328 )	
+	{
+		LCD_Code = ILI9325;
+		LCD_WriteReg(0x00e7,0x0010);      
+		LCD_WriteReg(0x0000,0x0001);  	/* start internal osc */
+		LCD_WriteReg(0x0001,0x0100);     
+		LCD_WriteReg(0x0002,0x0700); 	/* power on sequence */
+		LCD_WriteReg(0x0003,(1<<12)|(1<<5)|(1<<4)|(0<<3) ); 	/* importance */
+		LCD_WriteReg(0x0004,0x0000);                                   
+		LCD_WriteReg(0x0008,0x0207);	           
+		LCD_WriteReg(0x0009,0x0000);         
+		LCD_WriteReg(0x000a,0x0000); 	/* display setting */        
+		LCD_WriteReg(0x000c,0x0001);	/* display setting */        
+		LCD_WriteReg(0x000d,0x0000); 			        
+		LCD_WriteReg(0x000f,0x0000);
+		/* Power On sequence */
+		LCD_WriteReg(0x0010,0x0000);   
+		LCD_WriteReg(0x0011,0x0007);
+		LCD_WriteReg(0x0012,0x0000);                                                                 
+		LCD_WriteReg(0x0013,0x0000);                 
+		delay_ms(50);  /* delay 50 ms */		
+		LCD_WriteReg(0x0010,0x1590);   
+		LCD_WriteReg(0x0011,0x0227);
+		delay_ms(50);  /* delay 50 ms */		
+		LCD_WriteReg(0x0012,0x009c);                  
+		delay_ms(50);  /* delay 50 ms */		
+		LCD_WriteReg(0x0013,0x1900);   
+		LCD_WriteReg(0x0029,0x0023);
+		LCD_WriteReg(0x002b,0x000e);
+		delay_ms(50);  /* delay 50 ms */		
+		LCD_WriteReg(0x0020,0x0000);                                                            
+		LCD_WriteReg(0x0021,0x0000);           
+		delay_ms(50);  /* delay 50 ms */		
+		LCD_WriteReg(0x0030,0x0007); 
+		LCD_WriteReg(0x0031,0x0707);   
+		LCD_WriteReg(0x0032,0x0006);
+		LCD_WriteReg(0x0035,0x0704);
+		LCD_WriteReg(0x0036,0x1f04); 
+		LCD_WriteReg(0x0037,0x0004);
+		LCD_WriteReg(0x0038,0x0000);        
+		LCD_WriteReg(0x0039,0x0706);     
+		LCD_WriteReg(0x003c,0x0701);
+		LCD_WriteReg(0x003d,0x000f);
+		delay_ms(50);  /* delay 50 ms */		
+		LCD_WriteReg(0x0050,0x0000);        
+		LCD_WriteReg(0x0051,0x00ef);   
+		LCD_WriteReg(0x0052,0x0000);     
+		LCD_WriteReg(0x0053,0x013f);
+		LCD_WriteReg(0x0060,0xa700);        
+		LCD_WriteReg(0x0061,0x0001); 
+		LCD_WriteReg(0x006a,0x0000);
+		LCD_WriteReg(0x0080,0x0000);
+		LCD_WriteReg(0x0081,0x0000);
+		LCD_WriteReg(0x0082,0x0000);
+		LCD_WriteReg(0x0083,0x0000);
+		LCD_WriteReg(0x0084,0x0000);
+		LCD_WriteReg(0x0085,0x0000);
+		  
+		LCD_WriteReg(0x0090,0x0010);     
+		LCD_WriteReg(0x0092,0x0000);  
+		LCD_WriteReg(0x0093,0x0003);
+		LCD_WriteReg(0x0095,0x0110);
+		LCD_WriteReg(0x0097,0x0000);        
+		LCD_WriteReg(0x0098,0x0000);  
+		/* display on sequence */    
+		LCD_WriteReg(0x0007,0x0133);
+		
+		LCD_WriteReg(0x0020,0x0000);  /* ÐÐÊ×Ö·0 */                                                          
+		LCD_WriteReg(0x0021,0x0000);  /* ÁÐÊ×Ö·0 */     
+	}
+
+    delay_ms(50);   /* delay 50 ms */	
+}
+
+static void delay_ms(uint16_t ms) 
+//function to wait for the specified ms passed as argument   
+{ 
+	uint16_t i,j; 
+	for( i = 0; i < ms; i++ )
+	{ 
+		for( j = 0; j < 1141; j++ );
+	}
+} 
+```
+
+## LCD Clear
+#### File `GCLD.c`
+```c
+void LCD_Clear(uint16_t Color)
+{
+	uint32_t index;
+	
+	if( LCD_Code == HX8347D || LCD_Code == HX8347A )
+	{
+		LCD_WriteReg(0x02,0x00);                                                  
+		LCD_WriteReg(0x03,0x00);  
+		                
+		LCD_WriteReg(0x04,0x00);                           
+		LCD_WriteReg(0x05,0xEF);  
+		                 
+		LCD_WriteReg(0x06,0x00);                           
+		LCD_WriteReg(0x07,0x00);    
+		               
+		LCD_WriteReg(0x08,0x01);                           
+		LCD_WriteReg(0x09,0x3F);     
+	}
+	else
+	{	
+		LCD_SetCursor(0,0); 
+	}	
+
+	LCD_WriteIndex(0x0022);
+	for( index = 0; index < MAX_X * MAX_Y; index++ )
+	{
+		LCD_WriteData(Color);
+	}
+}
+
+```
+## LCD Clear
+#### File `GCLD.c`
+```c
+void LCD_SetPoint(uint16_t Xpos,uint16_t Ypos,uint16_t point)
+{
+	if( Xpos >= MAX_X || Ypos >= MAX_Y )
+	{
+		return;
+	}
+	LCD_SetCursor(Xpos,Ypos);
+	LCD_WriteReg(0x0022,point); //WRITE ON REG 22 to write Data on GRAM
+}
+```
+Using `LCD_WriteReg(..)` to set the index to the selected Register (22h) and to write data in it afterwads:
+```c
+static __attribute__((always_inline)) void LCD_WriteReg(uint16_t LCD_Reg,uint16_t LCD_RegValue)
+{ 
+	/* Write 16-bit Index, then Write Reg */  
+	LCD_WriteIndex(LCD_Reg);         
+	/* Write 16-bit Reg */
+	LCD_WriteData(LCD_RegValue);  
+}
+```
 
 ### Resources
 #### PINSEL Register associated to each pin:
@@ -526,3 +712,6 @@ void TIMER0_IRQHandler (void)
 
 #### ADGDR (ADC Global Data) Register bits:
 ![alt text](image-4.png)
+
+#### LCD Block Diagram MPU Side
+![alt text](image-6.png)
