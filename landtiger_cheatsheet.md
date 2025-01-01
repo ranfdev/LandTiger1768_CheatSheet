@@ -17,6 +17,12 @@
   - [RIT initialization](#rit-initialization-enable-disable-reset)
   - [RIT IRQHandler](#rit_irqhandler)
 
+- 🕒 [SYSTICK Timer](#systick-timer-assembly-only)
+  - [SYSTICK Registers Contants](#systick-registers-constants)
+  - [SYSTICK Initialization](#systick-initialization)
+  - [SYSTICK Predefined Handler](#systick-handler)
+  - [Retrieve SYSTICK Counter Value](#retrieve-systick-counter-value)
+
 - 🎮 [Joystick](#joystick)
   - [Initialization](#joystick-initialization---joystick_init)
   - [Polling with RIT](#joystick-rit-polling---rit_irqhandler)
@@ -52,6 +58,11 @@ while (1) { /* Loop forever */
 
 ## Generic Timers
 
+Power: In the PCONP register (Table 46), set bits PCTIM0/1/2/3. <br>
+**Remark**: On reset, Timer0/1 are enabled (PCTIM0/1 = 1), and Timer2/3 are disabled 
+(PCTIM2/3 = 0). <br>
+**To activate TIM2/3**: go to the **Configuration Wizard** of file `system_LPC17xx.c` > *Clock configuration* > *Power Control for Peripheral Registers (PCONP)* > check *PCTIM2* or *PCTIM3*.
+
 ### Calculating the timer counter 
 In `sample.c` you have to call the function to set the timer:
 ```c
@@ -70,6 +81,8 @@ $T$ is related to what you want to have as the timer interval. <br>
 ```c
 #ifndef __TIMER_H
 #define __TIMER_H
+
+#include "LPC17xx.h"
 
 /* init_timer.c */
 extern uint32_t init_timer( uint8_t timer_num, uint32_t timerInterval );
@@ -355,6 +368,72 @@ void RIT_IRQHandler (void)
 	}
 }
 ```
+
+## SYSTICK Timer (*Assembly only*)
+
+### Peripherals -> Core Peripherals -> SYSTICK Timer
+**SYSTICK Reload Value Register** stores the value to reload when timer reaches 0 -> **24 bit max** value length. <br>
+**SYSTICK Current Value Register** stores the current value of the timer. Writing any number clears its content.
+
+### SYSTICK Registers Constants
+#### File: `startup_LPC17xx.s`
+```asm
+SYScontrolAndStatusReg EQU 0xE000E010
+SYSreloadValueReg EQU 0xE000E014
+SYScurrentValueReg EQU 0xE000E018
+```
+
+### SYSTICK Initialization
+#### File: `startup_LPC17xx.s`
+**To stop the timer** -> save 0 in **SYScontrolAndStatusReg**  <br>
+**To set the desired interval between interrupts** -> write value in **SYSreloadValueReg**. **At each Clock Cycle the value gets decremented!**<br>
+**To Reset the SYSTICK timer counter** -> write **ANY** value in **SYScurrentValueReg** <br>
+**To Start the SYSTICK timer set these bits in SYScontrolAndStatusReg:**
+| Bit | Access | Function |
+|-----|----------|-----------|
+| 2 | R/W | 1 = use processor free running clock<br>0 = use external reference clock (*STCLK*) |
+| 1 | R/W | 1 = generate interrupt (exception) when timer reaches 0<br>0 = Do not generate interrupt (exception)|
+| 0 | R/W | 1 = **start** SYSTICK Timer<br>0 = **stop** SYSTICK Timer |
+
+```asm
+LDR r0, =SYScontrolAndStatusReg
+MOV r1, #0
+STR r1, [r0] ; step 1
+LDR r0, =SYSreloadValueReg
+LDR r1, =1023 ; 1023: example value
+STR r1, [r0] ; step 2
+LDR r0, =SYScurrentValueReg
+STR r1, [r0] ; step 3
+LDR r0, =SYScontrolAndStatusReg
+MOV r1, #7
+; 7 -> 111 so all bits 2:0 set to 1
+; 3 -> 011
+; 5 -> 101
+; etc
+STR r1, [r0] ; step 4
+```
+
+### SYSTICK Handler
+#### File: `startup_LPC17xx.s`
+The SYSTICK Handler is **already predefined** (don't copy-paste this code) in `startup_LPC17xx.s`, write in it and then use `bx lr` to branch back to the caller code:
+```asm
+SysTick_Handler PROC
+                EXPORT  SysTick_Handler           [WEAK]
+					
+				; SYSTICK HANDLER
+				
+				; write code here
+
+				; branch back
+				bx lr
+                ENDP
+
+```
+
+### Retrieve SYSTICK Counter value
+Read from **SYScurrentValueReg**, the value is in **24 bits**.
+
+
 ## ADC (to be used with Potentiometer)
 8 channel 12-bit ADC <br>
 Using the SIMULATOR, To disable potentiometer *non idealities* you have to go the the emulator Settings (rx click on emulator window)> uncheck *Enable/Disable Potentiometer non ideality* <br>
@@ -700,6 +779,13 @@ static __attribute__((always_inline)) void LCD_WriteReg(uint16_t LCD_Reg,uint16_
 ### Resources
 #### PINSEL Register associated to each pin:
 ![alt text](image-1.png)
+
+### BUTTONS PINS IN **PINSEL4** (Manual page 110)
+KEY0 -> 2.10 -> bits 21:20 in PINSEL4<br>
+KEY1 -> 2.11 -> bits 23:22 in PINSEL4 <br>
+KEY2 -> 2.12 -> bits 25:24 in PINSEL4<br>
+KEY3 -> 2.13 -> bits 27:26 in PINSEL4<br>
+![alt text](image-7.png)
 
 #### Match Control Registers bits, for generic timers:
 ![alt text](image-5.png)
