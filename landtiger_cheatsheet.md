@@ -1,4 +1,4 @@
-# Landtiger LPC1768 ARM Cortex M3 - CheatSheet
+bl digitsum# Landtiger LPC1768 ARM Cortex M3 - CheatSheet
 **Revalor Riccardo - [Github Repo for this CheatSheet](https://github.com/RiccardoRevalor/LandTiger1768_CheatSheet)**
 
 ## Summary
@@ -17,7 +17,7 @@
   - [RIT initialization](#rit-initialization-enable-disable-reset)
   - [RIT IRQHandler](#rit_irqhandler)
 
-- 🕒 [SYSTICK Timer](#systick-timer-assembly-only)
+- 🕒 [SYSTICK Timer (Assembly only)](#systick-timer-assembly-only)
   - [SYSTICK Registers Contants](#systick-registers-constants)
   - [SYSTICK Initialization](#systick-initialization)
   - [SYSTICK Predefined Handler](#systick-handler)
@@ -35,6 +35,14 @@
 
 - 🔊 [DAC Connected to the Speaker](#dac-connected-to-the-speaker)
   - [DAC Value Conversion](#convert-a-value)
+
+- 💻 [SVC - Supervisor Calls (Assembly only)](#svc---supervisor-calls-assembly-only)
+  - [SVC call in Reset Handler](#svc-call-in-reset-handler)
+  - [SVC Handler](#svc-handler)
+
+- 💻 [Bubble Sort](#bubble-sort)
+  - [Bubble Sort in C](#bubble-sort-in-c)
+  - [Bubble Sort in Assembly - **32 BIT R/W MEMORY AREA**](#bubble-sort-in-assembly---32-bit-rw-memory-area---adx-multiple-of-4-and-ldrstr)
 
 - 💻 [LCD and Touch Screen](#lcd-and-touch-screen)
   - [LCD Initialization and Configuration](#lcd-initialization-and-configuration)
@@ -590,6 +598,187 @@ void TIMER0_IRQHandler (void)
   LPC_TIM0->IR = 1;			/* clear interrupt flag */
   return;
 }
+```
+
+## SVC - Supervisor Calls (*Assembly only*)
+
+### SVC call in Reset Handler:
+#### File: `startup_LPC17xx.s`
+A supervisor call exception is generated as:
+```asm
+SVC #immediate
+```
+*#immediate* is the immediate that identifies the SVC. We can create **multiple** SVCs, each on of them will be identified by a **unique** immediate value! <br>
+**The SVC instruction is encoded in 16 bits, and the immediate value is stored in the least significant byte.**
+
+### SVC Handler:
+#### File: `startup_LPC17xx.s`
+All of this code must be put in the `SVC_Handler`: <br>
+**Beware: SP is at position 24 in the stack!!!**
+```asm
+SVC_Handler     PROC
+                EXPORT  SVC_Handler               [WEAK]
+
+				;Test bit 2 of EXC_RETURN in LR to determine which STACK was used and copy the content of the used stack in r0
+				tst lr, #0x4
+				ite eq
+				mrseq r0, MSP	;MSP used
+				mrsne r0, PSP	;PSP used
+
+				;get stacked PC from stack
+				ldr r1, [r0, #24]
+
+				;get identifier of te SVC, stored in the least significant byte
+				ldrb r0, [r1, #-2]
+
+				;execute the call:
+				cmp r0, #immediate	;replace #immediate with the SVC identifier (1 byte number)
+				beq svc_immediate
+
+				bx lr
+				
+				ENDP
+```
+
+## Bubble Sort
+
+### Bubble Sort in C
+
+#### Implementation #1:
+```c
+void bubbleSort(int array[], int size){
+   for(int i = 0; i<size; i++) {
+      int swaps = 0; //flag to detect any swap is there or not
+      for(int j = 0; j<size-i-1; j++) {
+         if(array[j] > array[j+1]) { //when the current item is bigger than next
+            int temp;
+            temp = array[j];
+            array[j] = array[j+1];
+            array[j+1] = temp;
+            swaps = 1; //set swap flag
+         }
+      }
+      if(!swaps)
+         break; // No swap in this pass, so array is sorted
+   }
+}
+```
+
+#### Implementation #1 Optimized:
+```c
+void bubbleSort(int array[], int size) {
+   if (array == NULL || size <= 1) {
+      return; // Gestione di input non validi
+   }
+
+   for (int i = 0; i < size; i++) {
+      int swaps = 0; // Flag per rilevare gli scambi
+      for (int j = 0; j < size - i - 1; j++) {
+         if (array[j] > array[j + 1]) {
+            // Scambio senza variabile temporanea (opzionale)
+            array[j] ^= array[j + 1];
+            array[j + 1] ^= array[j];
+            array[j] ^= array[j + 1];
+            swaps = 1; // Aggiorna il flag
+         }
+      }
+      if (!swaps) {
+         break; // L'array è già ordinato
+      }
+   }
+}
+```
+
+
+### Implementation #2:
+```c
+void swap(unsigned int* xp, unsigned int* yp){
+    unsigned int temp = *xp;
+    *xp = *yp;
+    *yp = temp;
+}
+
+// Implement Bubble Sort
+void bubbleSort(unsigned int *arr, int n){
+    int i, j;
+    bool swapped;
+    for (i = 0; i < n - 1; i++) {
+        swapped = false;
+        for (j = 0; j < n - i - 1; j++) {
+            if (arr[j] > arr[j + 1]) {
+                swap(&arr[j], &arr[j + 1]);
+                swapped = true;
+            }
+        }
+
+        // If no two elements were swapped by inner loop,
+        // then break
+        if (swapped == false)
+            break;
+    }
+		
+		return;
+}
+```
+
+### Bubble Sort in Assembly - **32 BIT R/W MEMORY AREA** -> adx multiple of 4 and ldr/str <br>
+*r0 -> adx of READ/WRITE memory area to be sorted* <br>
+*r1 -> size = number of INT32 elements to sort*
+```asm
+bubbleSort		PROC
+				stmfd sp!,{r4-r11,lr}
+				;r0: adx of array to sort
+				;r1: size -> number of elements of array to sort
+					
+				mov r3, #0	;i index
+
+ciclo_outer		;check i < size
+				cmp r3, r1
+				bge endAlgo
+				mov r2, #0	;swapped flag
+				mov r4, #0	;j index
+				
+				;calculate size - i - 1
+				sub r5, r1, r3
+				sub r5, r5, #1
+				
+ciclo_inner		;check if j < size - i - 1
+				cmp r4, r5
+				bge end_inner
+				;load array[j]
+				lsl r10, r4, #2
+				ldr r6, [r0, r10]
+				;load array[j+1]
+				add r10, r10, #4
+				ldr r8, [r0, r10]
+				;confront them
+				cmp r6, r8
+				ble next	;array[j] <= array[j+1]
+				
+				;if array[j] > array[j+1]
+				;swap
+				lsl r10, r4, #2
+				str r8, [r0, r10]
+				add r10, r10, #4
+				str r6, [r0, r10]
+				;set swapped to 1
+				mov r2, #1
+				
+next			;++j
+				add r4, r4, #1
+				b ciclo_inner
+				
+end_inner		;++i
+				add r3, r3, #1
+				;if no more swaps happened, vector is sorted
+				;check swap flag
+				cmp r2, #0
+				bne ciclo_outer ;if swap == 1 excute a new cycle
+	
+	
+endAlgo			ldmfd sp!,{r4-r11, pc}
+				ENDP
+
 ```
 
 ## LCD and Touch Screen 
