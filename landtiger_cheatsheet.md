@@ -472,6 +472,10 @@ void joystick_init(void) {
     LPC_PINCON->PINSEL3 &= ~(3<<26); // SET pin 26, 27 to 00 in PINSEL3
     LPC_GPIO1->FIODIR   &= ~(1<<29); // P1.29 Input (joystick on PORT1 defined as Input)
 
+	// Set joystick SELECT (pin 1.25)
+	LPC_PINCON->PINSEL3 &= ~(3<<18);
+	LPC_GPIO1->FIODIR   &= ~(1<<25);
+
 }
 ```
 
@@ -480,12 +484,14 @@ void joystick_init(void) {
 General Code:
 ```c
 int down = 0; 	//for button
+
 void RIT_IRQHandler (void)
 {					
 	static int up_joystick=0;
 	static int down_joystick = 0;
 	static int left_joystick = 0;
 	static int right_joystick = 0;
+	static int select_joystick = 0;
 	
 	if((LPC_GPIO1->FIOPIN & (1<<29)) == 0){	
 		/* Joytick UP pressed */
@@ -546,6 +552,12 @@ void RIT_IRQHandler (void)
 	}
 	else{
 			left_joystick=0;
+	}
+
+
+	if((LPC_GPIO1->FIOPIN & (1<<25)) == 0){	
+		/* Joystick SELECT pressed */
+		select_joystick++;
 	}
 	
 	
