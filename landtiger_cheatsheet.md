@@ -1,9 +1,20 @@
-bl digitsum# Landtiger LPC1768 ARM Cortex M3 - CheatSheet
-**Revalor Riccardo - [Github Repo for this CheatSheet](https://github.com/RiccardoRevalor/LandTiger1768_CheatSheet)**
+<h1> Landtiger LPC1768 ARM Cortex M3 - CheatSheet</h1>
+</h2>Revalor Riccardo - [Github Repo for this CheatSheet](https://github.com/RiccardoRevalor/LandTiger1768_CheatSheet)</h2>
 
 ## Summary
 
 - 🔋 [Power Down Mode](#power-down-mode)
+
+- 🚨 [LEDs](#leds)
+  - [LED Header](#led-header)
+  - [LED Init](#led-init)
+  - [LED_On, LED_Off, LED_Out](#led_on-led_off-led_out)
+
+
+- 🖲️ [Buttons (bouncing!)](#buttons-bouncing)
+  - [Buttons Header](#buttons-header)
+  - [Buttons Init](#buttons-init)
+  - [Buttons IRQ Handlers](#buttons-irq-handlers)
 
 - ⏱️ [Generic Timers](#generic-timers)
   - [Calculating Timer Counter](#calculating-the-timer-counter)
@@ -61,6 +72,157 @@ LPC_SC->PCON &= ~(0x2);
 		
 while (1) { /* Loop forever */	
 	__ASM("wfi");
+}
+```
+
+## LEDs
+
+### LED Header
+#### File: `led.h`
+```c
+/* lib_led */
+void LED_init(void);
+void LED_deinit(void);
+
+/* funct_led */
+void LED_On (unsigned int num);
+void LED_Off (unsigned int num);
+void LED_Out(unsigned int value);
+```
+
+### LED Init
+#### File: `lib_led.c`
+```c
+#include "lpc17xx.h"
+#include "led.h"
+
+unsigned char led_value;
+
+void LED_init(void) {
+	LPC_PINCON->PINSEL4 &= 0xFFFF0000;	//PIN mode GPIO (00b value per P2.0 to P2.7)
+	//SEE PAGE 123 OF MANUAL TO SET FIODIR
+	LPC_GPIO2->FIODIR   |= 0x000000FF;  //P2.0...P2.7 Output (LEDs on PORT2 defined as Output)
+	/* LPC_GPIO2->FIOSET    = 0x000000FF;	//all LEDs on */
+	LPC_GPIO2->FIOCLR    = 0x000000FF;  //all LEDs off
+	led_value = 0;
+}
+
+void LED_deinit(void) {
+
+  LPC_GPIO2->FIODIR &= 0xFFFFFF00;  
+}
+```
+
+### LED_On, LED_Off, LED_Out
+#### File: `funct_led.c`
+
+**REMEMBER: LEDs on the board go from LD4 (the leftmost LED on the emulator) to LD11 (the rightmost LED on the emulator)** </br>
+**To switch on LED x you have to do: LED_On(11-x)** </br>
+**LD4 -> LED_On(7)** </br>
+**LD11 -> LED_On(0)** </br>
+**LED_Out(...) also works this way, showing the result from LD11 (LSB) to LD4 (MSB)** </br>
+```c
+#include "lpc17xx.h"
+#include "led.h"
+
+#define LED_NUM     8                   /* Number of user LEDs                */
+const unsigned long led_mask[] = { 1UL<<0, 1UL<<1, 1UL<<2, 1UL<< 3, 1UL<< 4, 1UL<< 5, 1UL<< 6, 1UL<< 7 };
+extern unsigned char led_value;
+
+void LED_On(unsigned int num) {
+  	LPC_GPIO2->FIOPIN |= led_mask[num];
+	led_value = LPC_GPIO2->FIOPIN;
+}
+
+void LED_Off(unsigned int num) {
+  	LPC_GPIO2->FIOPIN &= ~led_mask[num];
+	led_value = LPC_GPIO2->FIOPIN;
+}
+
+void LED_Out(unsigned int value) {
+  int i;
+
+  for (i = 0; i < LED_NUM; i++) {
+    if (value & (1<<i)) {
+      LED_On (i);
+    } else {
+      LED_Off(i);
+    }
+  }
+	led_value = value;
+}
+```
+
+## Buttons (bouncing!)
+
+### Buttons Header
+#### File: `button.h`
+```c
+#include "LPC17xx.h"
+
+void BUTTON_init(void);
+void EINT1_IRQHandler(void);
+void EINT2_IRQHandler(void);
+void EINT3_IRQHandler(void);
+```
+
+### Buttons Init
+#### File: `lib_button.c`
+
+```c
+#include "button.h"
+#include "LPC17xx.h"
+void BUTTON_init(void) {
+
+  //INT0 -> PINSEL4 BITS 21:20, FIODIR PIN 2.10
+  LPC_PINCON->PINSEL4    |= (1 << 20);		 
+  LPC_GPIO2->FIODIR      &= ~(1 << 10);    
+  
+  //KEY1 -> PINSEL4 BITS 23:22, FIODIR PIN 2.11
+  LPC_PINCON->PINSEL4    |= (1 << 22);     
+  LPC_GPIO2->FIODIR      &= ~(1 << 11);    
+  
+  //KEY2 -> PINSEL4 BITS 25:24, FIODIR PIN 2.12
+  LPC_PINCON->PINSEL4    |= (1 << 24);     
+  LPC_GPIO2->FIODIR      &= ~(1 << 12);    
+
+  LPC_SC->EXTMODE = 0x7;
+
+  NVIC_EnableIRQ(EINT2_IRQn);              /* enable irq in nvic                 */
+	NVIC_SetPriority(EINT2_IRQn, 1);				 /* priority, the lower the better     */
+  NVIC_EnableIRQ(EINT1_IRQn);              /* enable irq in nvic                 */
+	NVIC_SetPriority(EINT1_IRQn, 2);				 
+  NVIC_EnableIRQ(EINT0_IRQn);              /* enable irq in nvic                 */
+	NVIC_SetPriority(EINT0_IRQn, 3);				 /* decreasing priority	from EINT2->0	 */
+}
+```
+
+### Buttons IRQ Handlers
+#### File: `IRQ_button.c`
+
+```c
+#include "button.h"
+#include "LPC17xx.h"
+
+#include "../led/led.h" 					
+
+void EINT0_IRQHandler (void)	  	/* INT0														 */
+{		
+	
+	LPC_SC->EXTINT &= (1 << 0);     /* clear pending interrupt         */
+}
+
+
+void EINT1_IRQHandler (void)	  	/* KEY1														 */
+{
+	
+	LPC_SC->EXTINT &= (1 << 1);     /* clear pending interrupt         */
+}
+
+void EINT2_IRQHandler (void)	  	/* KEY2														 */
+{
+	
+  LPC_SC->EXTINT &= (1 << 2);     /* clear pending interrupt         */    
 }
 ```
 
@@ -315,6 +477,103 @@ void joystick_init(void) {
 
 ### Joystick RIT Polling -> `RIT_IRQHandler()`
 #### File: `IRQ_RIT.c` 
+General Code:
+```c
+int down = 0; 	//for button
+void RIT_IRQHandler (void)
+{					
+	static int up_joystick=0;
+	static int down_joystick = 0;
+	static int left_joystick = 0;
+	static int right_joystick = 0;
+	
+	if((LPC_GPIO1->FIOPIN & (1<<29)) == 0){	
+		/* Joytick UP pressed */
+		up_joystick++;
+		switch(up_joystick){
+			case 1:
+				
+				break;
+			default:
+				break;
+		}
+	}
+	else{
+			up_joystick=0;
+	}
+	
+	
+	if((LPC_GPIO1->FIOPIN & (1<<26)) == 0){	
+		/* Joytick DOWN pressed */
+		down_joystick++;
+		switch(down_joystick){
+			case 1:
+			
+				break;
+			default:
+				break;
+		}
+	}
+	else{
+			down_joystick=0;
+	}
+	
+	if ((LPC_GPIO1->FIOPIN & (1<<28)) == 0){	
+		/* Joystick RIGHT pressed */
+		right_joystick++;
+		switch(right_joystick){
+			case 1:
+			
+				break;
+			default:
+				break;
+		}
+	}
+	else{
+			right_joystick=0;
+	}
+	
+	if ((LPC_GPIO1->FIOPIN & (1<<27)) == 0){	
+		/* Joystick LEFT pressed */
+		left_joystick++;
+		switch(left_joystick){
+			case 1:
+			
+				break;
+			default:
+				break;
+		}
+	}
+	else{
+			left_joystick=0;
+	}
+	
+	
+	/* button management */
+	if(down>=1){ 
+		if((LPC_GPIO2->FIOPIN & (1<<11)) == 0){	/* KEY1 pressed */
+			switch(down){				
+				case 2:				
+					/* code here */
+					break;
+				default:
+					break;
+			}
+			down++;
+		}
+		else {	/* button released */
+			down=0;			
+			NVIC_EnableIRQ(EINT1_IRQn);							 /* enable Button interrupts			*/
+			LPC_PINCON->PINSEL4    |= (1 << 22);     /* External interrupt 0 pin selection */
+		}
+	}
+	
+  LPC_RIT->RICTRL |= 0x1;	/* clear interrupt flag */
+	
+  return;
+}
+```
+Example Code: <br>
 The `if case` for Joystick UP contains an example using LEDs and considering continued pressing (when up == 60, so after 3 sec of continued pressing):
 ```c
 void RIT_IRQHandler (void)
