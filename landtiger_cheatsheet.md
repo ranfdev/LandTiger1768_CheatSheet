@@ -203,6 +203,7 @@ void BUTTON_init(void) {
 ```c
 #include "button.h"
 #include "LPC17xx.h"
+#include "../RIT/RIT.h"
 
 #include "../led/led.h" 					
 
@@ -212,17 +213,64 @@ void EINT0_IRQHandler (void)	  	/* INT0														 */
 	LPC_SC->EXTINT &= (1 << 0);     /* clear pending interrupt         */
 }
 
-
-void EINT1_IRQHandler (void)	  	/* KEY1														 */
+// This is debounced
+void EINT1_IRQHandler (void)
 {
+	enable_RIT();                       	
+	NVIC_DisableIRQ(EINT1_IRQn);
+  	/* GPIO pin selection 
+       EINT0: 20
+       EINT1: 22
+       EINT2: 24 */
+	LPC_PINCON->PINSEL4 &= ~(1 << 22);	
 	
-	LPC_SC->EXTINT &= (1 << 1);     /* clear pending interrupt         */
+    /* clear pending interrupt 
+       EINT0: 0
+       EINT1: 1
+       EINT2: 2 */
+	LPC_SC->EXTINT &= (1 << 1); 
 }
 
 void EINT2_IRQHandler (void)	  	/* KEY2														 */
 {
 	
   LPC_SC->EXTINT &= (1 << 2);     /* clear pending interrupt         */    
+}
+```
+
+```c
+// file: IRQ_RIT.c
+// for debouncing
+
+#include "RIT.h"
+
+void RIT_IRQHandler (void)
+{			
+	static int down = 0;
+	static uint8_t position = 0;
+	down++;
+  	// EINT0: 10
+    // EINT1: 11
+    // EINT2: 12
+	if ((LPC_GPIO2->FIOPIN & (1<<11)) == 0) {
+		reset_RIT();
+		if (down == 1) {
+			if (position == 7) {
+				position = 0;
+			}
+			LED_Off(position);
+			LED_On(++position);
+		}
+	} else { // button released
+		down = 0;			
+		disable_RIT();
+		reset_RIT();
+		NVIC_EnableIRQ(EINT1_IRQn);
+		LPC_PINCON->PINSEL4 |= (1 << 22);
+	}
+		
+  LPC_RIT->RICTRL |= 0x1;	/* clear interrupt flag */
+  return;
 }
 ```
 
@@ -483,142 +531,28 @@ void joystick_init(void) {
 #### File: `IRQ_RIT.c` 
 General Code:
 ```c
-#include "LPC17xx.h"
-#include "RIT.h"
+enum JoystickPin {
+	DOWN_PIN = 26,
+	LEFT_PIN,
+	RIGHT_PIN,
+	UP_PIN
+};
 
-int down = 0; 	//for button
-
+volatile int down = 0;
 void RIT_IRQHandler (void)
 {					
-	static int up_joystick=0;
-	static int down_joystick = 0;
-	static int left_joystick = 0;
-	static int right_joystick = 0;
-	static int select_joystick = 0;
-	
-	if((LPC_GPIO1->FIOPIN & (1<<29)) == 0){	
-		/* Joytick UP pressed */
-		up_joystick++;
-		switch(up_joystick){
-			case 1:
-				
-				break;
-			default:
-				break;
-		}
-	}
-	else{
-			up_joystick=0;
-	}
-	
-	
-	if((LPC_GPIO1->FIOPIN & (1<<26)) == 0){	
-		/* Joytick DOWN pressed */
-		down_joystick++;
-		switch(down_joystick){
-			case 1:
-			
-				break;
-			default:
-				break;
-		}
-	}
-	else{
-			down_joystick=0;
-	}
-	
-	if ((LPC_GPIO1->FIOPIN & (1<<28)) == 0){	
-		/* Joystick RIGHT pressed */
-		right_joystick++;
-		switch(right_joystick){
-			case 1:
-			
-				break;
-			default:
-				break;
-		}
-	}
-	else{
-			right_joystick=0;
-	}
-	
-	if ((LPC_GPIO1->FIOPIN & (1<<27)) == 0){	
-		/* Joystick LEFT pressed */
-		left_joystick++;
-		switch(left_joystick){
-			case 1:
-			
-				break;
-			default:
-				break;
-		}
-	}
-	else{
-			left_joystick=0;
-	}
+	static int up = 0;
+	static int position = 0;	
 
-
-	if((LPC_GPIO1->FIOPIN & (1<<25)) == 0){	
-		/* Joystick SELECT pressed */
-		select_joystick++;
-	}
-	
-	
-	/* button management */
-	if(down>=1){ 
-		if((LPC_GPIO2->FIOPIN & (1<<11)) == 0){	/* KEY1 pressed */
-			switch(down){				
-				case 2:				
-					/* code here */
-					break;
-				default:
-					break;
-			}
-			down++;
-		}
-		else {	/* button released */
-			down=0;			
-			NVIC_EnableIRQ(EINT1_IRQn);							 /* enable Button interrupts			*/
-			LPC_PINCON->PINSEL4    |= (1 << 22);     /* External interrupt 0 pin selection */
-		}
-	}
-	
-  LPC_RIT->RICTRL |= 0x1;	/* clear interrupt flag */
-	
-  return;
-}
-```
-Example Code: <br>
-The `if case` for Joystick UP contains an example using LEDs and considering continued pressing (when up == 60, so after 3 sec of continued pressing):
-```c
-void RIT_IRQHandler (void)
-{					
-	static int up=0;
-	static int position=0;
-	static int down_joystick = 0;
-	
-	if((LPC_GPIO1->FIOPIN & (1<<29)) == 0){	
-		/* Joytick UP pressed */
+	if ((LPC_GPIO1->FIOPIN & (1 << UP_PIN)) == 0) {	
 		up++;
-		switch(up){
+		switch(up) {
 			case 1:
-				//turn off the led of currrent position and on the led at position 0
 				LED_Off(position);
 				LED_On(0);
 				position = 0;
 				break;
-			case 60:	//3sec = 3000ms/50ms = 60
-				//60: after 3 sec
-				/*
-			check after 3 seconds: 
-			Tpoll = 50 ms (period of polling)
-			Tcheck = 3 seconds = 3000 ms
-			1 interval takes 50 ms
-			2 interval take 100 ms
-			4 intervals take 200 ms
-			So I have to wait for 3 seconds is simply Tcheck / Tpoll
-			So 3000 ms / 50 ms = 60 intervals of 50 ms each!!!
-				*/
+			case 60: //3sec = 3000ms/50ms = 60
 				LED_Off(position);
 				LED_On(7);
 				position = 7;
@@ -626,28 +560,34 @@ void RIT_IRQHandler (void)
 			default:
 				break;
 		}
-	}
-	else{
-			up=0;
-	}
-		
-	if((LPC_GPIO1->FIOPIN & (1<<26)) == 0){	
-		/* Joytick DOWN pressed */
-		down_joystick++;
-	}
-	else{
-		down_joystick=0;
-	}
-	
-	if ((LPC_GPIO1->FIOPIN & (1<<27)) == 0){	
-        /* Joytick LEFT pressed */
-		down++; //do something...
+	} else {
+		up = 0;
 	}
 
-    if ((LPC_GPIO1->FIOPIN & (1<<28)) == 0){	
-        /* Joytick RIGHT pressed */
-		down--;
+	/* button management */
+	if (down >= 1) { 
+		if ((LPC_GPIO2->FIOPIN & (1<<11)) == 0) {
+			switch(down){				
+				case 2: /* pay attention here: please see slides 19 to understand value 2 */
+					if (position == 7) {
+						position = 0;
+					}
+					LED_Off(position);
+					LED_On(++position);
+					break;
+				default:
+					break;
+			}
+			down++;
+		} else { // button released
+			down = 0;
+			NVIC_EnableIRQ(EINT1_IRQn);
+			LPC_PINCON->PINSEL4 |= (1 << 22);  /* External interrupt 0 pin selection */
+		}
 	}
+
+	LPC_RIT->RICTRL |= 0x1;	/* clear interrupt flag */
+	return;
 }
 ```
 
@@ -1067,10 +1007,42 @@ endAlgo			ldmfd sp!,{r4-r11, pc}
 - Registers **20 h, 21 h** (0x0020, 0x0021): Horizontal GRAM (20), Vertical GRAM (21) Address Set
 
 ### LCD Initialization and Configuration
-In `sample.c` you have to call:
+
 ```c
-LCD_Initialization();	
+int main(void)
+{
+  // ...
+  
+  LCD_Initialization();
+	
+  TP_Init();
+  TouchPanel_Calibrate();
+
+  LCD_Clear(Black);
+  GUI_Text(0, 280, (uint8_t *) " touch here : 1 sec to clear  ", Red, White);
+  
+  // Useful functions
+  uint16_t x0, y0, x1, y1;
+  uint16_t color = White;
+  LCD_DrawLine(x0, y0, x1, y1, color);
+  LCD_SetPoint(x0, y0, color);
+  PutChar(x0, y0, x1, y1, 'a', White, Black);
+  
+  // To read touch position
+  // the `display` and `matrix` variables come from "../TouchPanel/TouchPanel.h" 
+  if (getDisplayPoint(&display, Read_Ads7846(), &matrix)) {
+    if(display.y < 280){
+      // ...
+    }
+  }
+  
+  init_timer(0, 0x6108 );   /* 1ms * 25MHz = 25*10^3 = 0x6108 */
+
+  enable_timer(0);
+  // ...
+}	
 ```
+
 #### File `GCLD.c`
 
 **Notice that LCD uses the same GPIO Pins as LEDs (P2.0 up to 2.7) so when using the LCD some leds will randomly be switched on!**
