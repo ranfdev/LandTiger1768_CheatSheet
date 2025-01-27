@@ -483,6 +483,9 @@ void joystick_init(void) {
 #### File: `IRQ_RIT.c` 
 General Code:
 ```c
+#include "LPC17xx.h"
+#include "RIT.h"
+
 int down = 0; 	//for button
 
 void RIT_IRQHandler (void)
